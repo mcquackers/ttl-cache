@@ -183,9 +183,10 @@ func TestNewCacheEntry(t *testing.T) {
 //--New Entry correctly sorted
 //--Existing Entry - Overwrite and update TTL
 //--Full cache calls evict -- TODO
+//--Add/Update to Cache is concurrent safe -- TODO
 //
 //-Error
-//--Cache is full -- TODO
+//--Cache is full after evict-- TODO
 func TestTTLCache_Set(t *testing.T) {
 	css := new(setSuite)
 	suite.Run(t, css)
@@ -316,9 +317,9 @@ func (uc *updateCacheSuite) TestUpdateCache_Success() {
 
 func (uc *updateCacheSuite) TestUpdateCache_InvalidRequest() {
 	updateEntry := &cacheEntry{
-		key: key("invalid key"),
+		key:   key("invalid key"),
 		value: 23,
-		exp: getExp(uc.cache.defaultTTL),
+		exp:   getExp(uc.cache.defaultTTL),
 	}
 
 	err := uc.cache.updateCacheEntry(updateEntry)
@@ -326,14 +327,50 @@ func (uc *updateCacheSuite) TestUpdateCache_InvalidRequest() {
 	assert.Equal(uc.T(), newBadUpdateRequestErr(updateEntry.key), err)
 }
 
-//TODO
-//Get From Cache
+//TestCases
+//-Success
+//--Successfully found
+//
+//-Error
+//--Not found
+func TestCache_Get(t *testing.T) {
+	gc := new(getCacheSuite)
+	suite.Run(t, gc)
+}
+
+type getCacheSuite struct {
+	key   key
+	value interface{}
+	entry *cacheEntry
+	cacheSuite
+}
+
+func (gc *getCacheSuite) SetupSuite() {
+	gc.cacheSuite.SetupSuite()
+	gc.key = key("exists")
+	gc.value = "value"
+	gc.entry = newCacheEntry(gc.key, gc.value, getExp(gc.defaultTTL))
+	gc.cache.cache[gc.key] = gc.entry
+}
+
+func (gc *getCacheSuite) TestCache_Get_Success() {
+	value, err := gc.cache.Get(gc.key)
+	assert.Nil(gc.T(), err)
+	assert.Equal(gc.T(), gc.value, value)
+}
+
+func (gc *getCacheSuite) TestCache_Get_NotFound() {
+	nonexistentKey := key("doesn't exist")
+	value, err := gc.cache.Get(nonexistentKey)
+	assert.Nil(gc.T(), value)
+	assert.NotNil(gc.T(), err)
+	assert.Equal(gc.T(), newKeyNotFoundErr(nonexistentKey), err)
+}
 
 //TODO
 //Eviction
 
 //prospective: Export Manual Eviction
-
 
 func assertCachesAreEqual(t *testing.T, expected, actual *TTLCache) {
 	if expected == nil || actual == nil {

@@ -20,3 +20,7 @@ func newInvalidSizeErr(invalidSize uint) error {
 func newBadUpdateRequestErr(invalidKey key) error {
 	return fmt.Errorf("invalid key for update request %s", invalidKey)
 }
+
+func newKeyNotFoundErr(notFoundKey key) error {
+	return fmt.Errorf("key %s not found", notFoundKey)
+}

@@ -63,6 +63,15 @@ func (c *TTLCache) Set(key key, value interface{}, optTTL ...time.Duration) erro
 	return nil
 }
 
+func (c *TTLCache) Get(key key) (interface{}, error) {
+	entry, exists := c.cache[key]
+	if !exists {
+		return nil, newKeyNotFoundErr(key)
+	}
+
+	return entry.value, nil
+}
+
 //Possible optimization: use Sort.Search to find new location for entry; use multiple copy() to remove existing entry and re-add
 //Benchmark it
 func (c *TTLCache) updateCacheEntry(entry *cacheEntry) error {
