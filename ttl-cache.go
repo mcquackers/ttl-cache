@@ -8,14 +8,15 @@ import (
 type key string
 type cacheEntry struct {
 	value interface{}
-	key key
-	exp uint32
+	key   key
+	exp   uint32
 }
 type TTLCache struct {
-	defaultTTL time.Duration
-	cache map[key]*cacheEntry
+	defaultTTL  time.Duration
+	cache       map[key]*cacheEntry
 	sweepTicker *time.Ticker
-	ttlHK []*cacheEntry
+	ttlHK       []*cacheEntry
+	size uint
 }
 
 func NewTTLCache(numSize uint, defaultTTL, sweepPeriod time.Duration) (*TTLCache, error) {
@@ -23,27 +24,28 @@ func NewTTLCache(numSize uint, defaultTTL, sweepPeriod time.Duration) (*TTLCache
 		return nil, newInvalidSizeErr(numSize)
 	}
 
-	if defaultTTL <= 0 * time.Second {
+	if defaultTTL <= 0*time.Second {
 		return nil, newInvalidTTLErr(defaultTTL)
 	}
 
-	if sweepPeriod <= 0 * time.Second {
+	if sweepPeriod <= 0*time.Second {
 		return nil, newInvalidSweepPeriodErr(sweepPeriod)
 	}
 
 	return &TTLCache{
-		defaultTTL: defaultTTL,
-		cache: make(map[key]*cacheEntry, numSize),
+		defaultTTL:  defaultTTL,
+		cache:       make(map[key]*cacheEntry, numSize),
 		sweepTicker: time.NewTicker(sweepPeriod),
-		ttlHK: make([]*cacheEntry, 0, numSize),
+		ttlHK:       make([]*cacheEntry, 0, numSize),
+		size: numSize,
 	}, nil
 }
 
 func newCacheEntry(key key, value interface{}, exp uint32) *cacheEntry {
 	return &cacheEntry{
-		key: key,
+		key:   key,
 		value: value,
-		exp: exp,
+		exp:   exp,
 	}
 }
 
@@ -70,6 +72,26 @@ func (c *TTLCache) Get(key key) (interface{}, error) {
 	}
 
 	return entry.value, nil
+}
+
+func (c *TTLCache) evict(exp uint32) {
+	indexOfLastEvicted := c.evictFromCoreCache(exp)
+	if indexOfLastEvicted >= 0 {
+		c.ttlHK = c.ttlHK[indexOfLastEvicted+1:]
+	}
+}
+
+func (c *TTLCache) evictFromCoreCache(exp uint32) int {
+	indexOfLastEvicted := -1
+	for i, cacheEntry := range c.ttlHK {
+		if cacheEntry.exp < exp {
+			delete(c.cache, cacheEntry.key)
+			indexOfLastEvicted = i
+			continue
+		}
+		break
+	}
+	return indexOfLastEvicted
 }
 
 //Possible optimization: use Sort.Search to find new location for entry; use multiple copy() to remove existing entry and re-add

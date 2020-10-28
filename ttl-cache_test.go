@@ -62,6 +62,7 @@ func TestNewTTLCache_Creation(t *testing.T) {
 				sweepTicker: time.NewTicker(5 * time.Second),
 				cache:       make(map[key]*cacheEntry, 10),
 				ttlHK:       make([]*cacheEntry, 0, 10),
+				size:        10,
 			},
 			expectedErr: nil,
 		},
@@ -367,8 +368,127 @@ func (gc *getCacheSuite) TestCache_Get_NotFound() {
 	assert.Equal(gc.T(), newKeyNotFoundErr(nonexistentKey), err)
 }
 
-//TODO
 //Eviction
+//TestCases
+//-Success
+//--Empty Cache
+//--Nothing to evict
+//--Several things to evict
+//--All things to evict
+func TestCache_evict(t *testing.T) {
+	ec := new(evictCacheSuite)
+	suite.Run(t, ec)
+}
+
+type evictCacheSuite struct {
+	cacheSuite
+}
+
+func (ec *evictCacheSuite) SetupTest() {
+	ec.cacheSuite.SetupSuite()
+}
+
+func (ec *evictCacheSuite) TestCache_Evict_EmptyCache() {
+	expectedLen := 0
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.cache))
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.ttlHK))
+
+	assert.NotPanics(ec.T(), func() {
+		ec.cache.evict(uint32(time.Now().Unix()))
+	})
+
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.cache))
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.ttlHK))
+}
+
+func (ec *evictCacheSuite) TestCache_Evict_NothingToEvict() {
+	var expectedLen int
+
+	k := key("not expired")
+	err := ec.cache.Set(k, "value", 5*time.Second)
+	require.Nil(ec.T(), err)
+	expectedLen++
+
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.cache))
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.ttlHK))
+
+	assert.NotPanics(ec.T(), func() {
+		ec.cache.evict(uint32(time.Now().Unix()))
+	})
+
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.cache))
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.ttlHK))
+}
+
+func (ec *evictCacheSuite) TestCache_Evict_SeveralThingsToEvict() {
+	var expectedLen int
+
+	k := key("not expired")
+	valueToKeep := interface{}("value")
+	err := ec.cache.Set(k, valueToKeep, 5*time.Second)
+	require.Nil(ec.T(), err)
+	expectedLen++
+
+	keyToEvict1 := key("ek1")
+	keyToEvict2 := key("ek2")
+
+	evict1 := newCacheEntry(keyToEvict1, "value to evict1", uint32(time.Now().Add(-5*time.Second).Unix()))
+	evict2 := newCacheEntry(keyToEvict2, "value to evict2", uint32(time.Now().Add(-1*time.Second).Unix()))
+
+	ec.cache.cache[keyToEvict1] = evict1
+	ec.cache.insertNewHKEntry(evict1)
+	expectedLen++
+	ec.cache.cache[keyToEvict2] = evict2
+	ec.cache.insertNewHKEntry(evict2)
+	expectedLen++
+
+	assertCacheHasNKeys(ec.T(), expectedLen, ec.cache)
+
+	assert.NotPanics(ec.T(), func() {
+		ec.cache.evict(uint32(time.Now().Unix()))
+	})
+
+	expectedLen = 1
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.cache))
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.ttlHK))
+
+	assertKeyDoesNotExist(ec.T(), keyToEvict1, ec.cache)
+	assertKeyDoesNotExist(ec.T(), keyToEvict2, ec.cache)
+
+	assertKeyMapsToValue(ec.T(), valueToKeep, k, ec.cache)
+}
+
+func (ec *evictCacheSuite) TestCache_Evict_AllTheThings() {
+	var expectedLen int
+
+	keyToEvict1 := key("ek1")
+	keyToEvict2 := key("ek2")
+
+	evict1 := newCacheEntry(keyToEvict1, "value to evict1", uint32(time.Now().Add(-5*time.Second).Unix()))
+	evict2 := newCacheEntry(keyToEvict2, "value to evict2", uint32(time.Now().Add(-1*time.Second).Unix()))
+
+	ec.cache.cache[keyToEvict1] = evict1
+	ec.cache.insertNewHKEntry(evict1)
+	expectedLen++
+	ec.cache.cache[keyToEvict2] = evict2
+	ec.cache.insertNewHKEntry(evict2)
+	expectedLen++
+
+	//TODO extract to assertCacheHasNKeys
+	assertCacheHasNKeys(ec.T(), expectedLen, ec.cache)
+
+	assert.NotPanics(ec.T(), func() {
+		ec.cache.evict(uint32(time.Now().Unix()))
+	})
+
+	expectedLen = 0
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.cache))
+	assert.Equal(ec.T(), expectedLen, len(ec.cache.ttlHK))
+	//assert.Equal(ec.T(), int(ec.size), cap(ec.cache.ttlHK)) TODO Implement a ring array
+
+	assertKeyDoesNotExist(ec.T(), keyToEvict1, ec.cache)
+	assertKeyDoesNotExist(ec.T(), keyToEvict2, ec.cache)
+}
 
 //prospective: Export Manual Eviction
 
@@ -382,4 +502,22 @@ func assertCachesAreEqual(t *testing.T, expected, actual *TTLCache) {
 	assert.Equal(t, len(expected.cache), len(actual.cache))
 	assert.Equal(t, len(expected.ttlHK), len(actual.ttlHK))
 	assert.Equal(t, cap(expected.ttlHK), cap(actual.ttlHK))
+}
+
+func assertCacheHasNKeys(t *testing.T, expectedKeys int, cache *TTLCache) {
+	assert.Len(t, cache.cache, expectedKeys)
+	assert.Len(t, cache.ttlHK, expectedKeys)
+}
+
+func assertKeyDoesNotExist(t *testing.T, key key, cache *TTLCache) {
+	value, err := cache.Get(key)
+	assert.Nil(t, value)
+	assert.NotNil(t, err)
+	assert.Equal(t, newKeyNotFoundErr(key), err)
+}
+
+func assertKeyMapsToValue(t *testing.T, expectedValue interface{}, key key, cache *TTLCache) {
+	value, err := cache.Get(key)
+	assert.Nil(t, err)
+	assert.Equal(t, expectedValue, value)
 }
